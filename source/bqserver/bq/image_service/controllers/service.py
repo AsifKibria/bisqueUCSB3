@@ -398,8 +398,18 @@ class ImageServiceController(ServiceController):
                             content_disposition=disposition)
 
             # Inject Cache-Control manually via response headers
-            max_age = config.get('bisque.image_service.cache_max_age', 3600)
-            tg.response.headers['Cache-Control'] = f'public, max-age={max_age}'
+            # max_age = config.get('bisque.image_service.cache_max_age', 3600)
+            # tg.response.headers['Cache-Control'] = f'public, max-age={max_age}'
+            
+            try:
+                modified = datetime.fromtimestamp(os.stat(token.data).st_mtime)
+                etag_value = md5((str(modified) + str(ident)).encode()).hexdigest()
+                tg.response.headers['ETag'] = f'"{etag_value}"'
+                
+                # Set cache control with revalidation
+                tg.response.headers['Cache-Control'] = 'public, must-revalidate'
+            except OSError:
+                tg.response.headers['Cache-Control'] = 'no-cache'
             return use_wsgi_app(fileapp)
 
         # log.info(f"------- request image id:{ident} token = {token}-----")

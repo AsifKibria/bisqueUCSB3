@@ -97,3 +97,6 @@ google-auth==2.25.2
 google-auth-oauthlib==1.2.0
 google-auth-httplib2==0.2.0
 PyJWT==2.8.0
+
+# For KML and GeoJSON export
+pyproj==3.7.1

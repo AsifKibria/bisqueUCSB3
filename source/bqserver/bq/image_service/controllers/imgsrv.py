@@ -80,16 +80,33 @@ def url2operationsOld(url, base):
     if path[0].lower() in ["image", "images"]:
         path = path[1:]
     resource_id = path.pop(0)
+    
+    # Check if the next path segment is an operation
+    query = []
     if len(path) > 0:
-        path = [unquote(p) for p in path]
-        subpath = "/%s" % ("/".join(path))
+        first_segment = unquote(path[0])
+        # List of known operations that can be called as path segments
+        known_operations = ['cleancache', 'slice', 'tile', 'format', 'depth', 'fuse', 'histogram', 
+                           'levels', 'negative', 'rotate', 'resize', 'thumbnail', 'meta', 'dims']
+        
+        if first_segment in known_operations:
+            # Treat as operation
+            query.append((first_segment, ''))
+            path.pop(0)  # Remove the operation from path
+            if len(path) > 0:
+                # If there are more segments, treat as subpath
+                path = [unquote(p) for p in path]
+                subpath = "/%s" % ("/".join(path))
+        else:
+            # Treat as subpath
+            path = [unquote(p) for p in path]
+            subpath = "/%s" % ("/".join(path))
 
     # process query string
     scheme, netloc, url, params, querystring, fragment = urlparse(url)
 
     # pairs = [s2 for s1 in querystring.split('&') for s2 in s1.split(';')]
     pairs = [s1 for s1 in querystring.split("&")]
-    query = []
     for name_value in pairs:
         if not name_value:
             continue
@@ -99,6 +116,12 @@ def url2operationsOld(url, base):
 
         name = unquote(nv[0].replace("+", " "))
         value = unquote(nv[1].replace("+", " "))
+        
+        # Skip known non-operation parameters
+        non_operation_params = ['_dc', 'cache', 'timestamp', 'nocache']
+        if name in non_operation_params:
+            continue
+            
         query.append((name, value))
 
     return resource_id, subpath, query
