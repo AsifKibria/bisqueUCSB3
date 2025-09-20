@@ -99,6 +99,31 @@ class AuthenticationServer(ServiceController):
     service_type = "auth_service"
     providers = {}
 
+    def _is_domain_authorized(self, email):
+        """Check if email domain is in authorized domains list for social login"""
+        log.error("Checking domain authorization for email: %s", email)
+        if not email or '@' not in email:
+            return False
+        
+        domain = email.split('@')[1].lower()
+        
+        try:
+            # Ensure domain tables exist
+            from bq.admin_service.controllers.service import ensure_domain_tables
+            if not ensure_domain_tables():
+                # If tables can't be created (e.g., during setup), allow all access
+                log.warning("Domain tables not available, allowing all access")
+                return True
+            
+            from bq.data_service.model.domain_model import is_domain_authorized
+            return is_domain_authorized(email)
+            
+        except Exception as e:
+            # If domain model doesn't exist or there's an error, default to allow all
+            # This maintains backward compatibility
+            log.warning(f"Domain authorization check failed, allowing access: {e}")
+            return True
+
 
     @classmethod
     def login_map(cls):
@@ -229,7 +254,38 @@ class AuthenticationServer(ServiceController):
                     else:
                         log.warning(f"User not found in database during email verification check: {userid}")
                 else:
-                    log.debug(f"Email verification not available - allowing login for: {userid}")
+                    # Email verification not available - check if user is manually verified by admin
+                    log.debug(f"Email verification not available - checking manual verification for: {userid}")
+                    bq_user = DBSession.query(BQUser).filter(BQUser.resource_name == userid).first()
+                    if bq_user:
+                        # Check if user has email_verified tag (manual admin approval)
+                        from bq.data_service.model.tag_model import Tag
+                        
+                        verified_tag = (
+                            DBSession.query(Tag)
+                            .filter(
+                                Tag.parent == bq_user,
+                                Tag.resource_name == "email_verified",
+                                Tag.resource_value == "true",
+                            )
+                            .first()
+                        )
+                        
+                        log.error(f"Manual verification check for user {userid}, verified_tag: {verified_tag}")
+                        
+                        if not verified_tag:
+                            # User is not manually verified - deny login
+                            log.warning(f"Login denied for unverified user (no SMTP): {userid}")
+                            flash(_('Your account requires administrator approval before you can sign in. Please contact an administrator.'), 'error')
+                            redirect('/auth_service/logout_handler?came_from=/client_service/')
+                            return
+                        else:
+                            log.info(f"Manually verified user logged in: {userid}")
+                    else:
+                        log.warning(f"User not found during manual verification check: {userid}")
+                        flash(_('Account not found. Please contact an administrator.'), 'error')
+                        redirect('/auth_service/logout_handler?came_from=/client_service/')
+                        return
                 
         except (ImportError, AttributeError, NameError) as import_error:
             # Only catch import/attribute errors, not redirects
@@ -541,6 +597,15 @@ class AuthenticationServer(ServiceController):
             provider_info = decoded_token.get('firebase', {}).get('sign_in_provider', 'unknown')
             
             log.info(f"Firebase token verified for {email} (provider: {provider_info})")
+            
+            # Check if email domain is authorized for social login
+            if not self._is_domain_authorized(email):
+                domain = email.split('@')[1] if '@' in email else 'unknown'
+                log.warning(f"Social login attempt from unauthorized domain: {domain}")
+                return {
+                    'status': 'error',
+                    'message': f'Social login is not authorized for domain: {domain}. Please contact an administrator.'
+                }
             
             # Check if user exists in BisQue
             from bq.data_service.model import BQUser

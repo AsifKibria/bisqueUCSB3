@@ -1,0 +1,239 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml"
+      xml:lang="en" lang="en"
+      xmlns:py="http://genshi.edgewall.org/"
+      xmlns:xi="http://www.w3.org/2001/XInclude">
+
+<xi:include href="master.html" />
+
+<head>
+  <title>User Approvals - BisQue Admin</title>
+
+  <!-- DataTables CSS -->
+  <link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/1.13.6/css/dataTables.bootstrap5.min.css" />
+  
+  <!-- Fix for templates that do not create html in the body -->
+  <style type="text/css">
+    #content { margin: 0px; }
+    body { background-color: #FAFAFA !important; }
+    .pending-registrations { padding: 20px; }
+    .card { margin-bottom: 20px; border: 1px solid #ddd; border-radius: 8px; }
+    .card-header { background-color: #f8f9fa; padding: 15px; border-bottom: 1px solid #ddd; }
+    .card-body { padding: 15px; }
+    .btn { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; margin-right: 5px; }
+    .btn-success { background-color: #28a745; color: white; }
+    .btn-danger { background-color: #dc3545; color: white; }
+    .btn-secondary { background-color: #6c757d; color: white; }
+    .btn-outline-primary { background-color: transparent; color: #007bff; border: 1px solid #007bff; }
+    .table { width: 100%; border-collapse: collapse; }
+    .table th, .table td { padding: 8px; border: 1px solid #ddd; }
+    .table th { background-color: #f8f9fa; }
+    .status-pending { color: #856404; background-color: #fff3cd; padding: 2px 8px; border-radius: 4px; }
+    .status-approved { color: #155724; background-color: #d4edda; padding: 2px 8px; border-radius: 4px; }
+    .status-rejected { color: #721c24; background-color: #f8d7da; padding: 2px 8px; border-radius: 4px; }
+  </style>
+
+  <script type="text/javascript" id="config">
+      BQ.Server.toolbar_opts = { 'browse': false };
+  </script>
+</head>
+
+<body>
+  <div class="pending-registrations">
+    <h1>User Approvals</h1>
+    
+    <div class="card">
+      <div class="card-header">
+        <h3>Users Awaiting Verification</h3>
+        <div style="float: right;">
+          <a href="/admin/domain_management" class="btn btn-secondary">Manage Domains</a>
+          <a href="/admin/" class="btn btn-outline-primary">Back to Admin</a>
+          <button class="btn btn-secondary" onclick="refreshRegistrations()">Refresh</button>
+        </div>
+        <div style="clear: both;"></div>
+      </div>
+      <div class="card-body">
+        <div id="registrationTableContainer">
+          <table class="table" id="registrationTable">
+            <thead>
+              <tr>
+                <th>Email</th>
+                <th>Full Name</th>
+                <th>Request Date</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="text/javascript">
+    //<![CDATA[
+    // Pending registrations functionality
+    document.addEventListener('DOMContentLoaded', function() {
+      loadPendingRegistrations();
+    });
+
+    function loadPendingRegistrations() {
+      fetch('/admin/pending_list')
+        .then(function(response) { return response.json(); })
+        .then(function(data) {
+          if (data.status === 'success') {
+            displayRegistrations(data.registrations);
+          } else {
+            alert('Error loading pending registrations: ' + data.message);
+          }
+        })
+        .catch(function(error) {
+          console.error('Error:', error);
+          alert('Error loading pending registrations');
+        });
+    }
+
+    function displayRegistrations(registrations) {
+      // Destroy existing DataTable if it exists
+      if (window.registrationDataTable) {
+        window.registrationDataTable.destroy();
+      }
+      
+      // Prepare data for DataTables
+      var tableData = [];
+      for (var i = 0; i < registrations.length; i++) {
+        var reg = registrations[i];
+        
+        var statusSpan = document.createElement('span');
+        statusSpan.className = 'status-' + (reg.status || 'pending');
+        statusSpan.textContent = reg.status || 'pending';
+        
+        var actions = '';
+        if (reg.status === 'pending') {
+          actions = '<button class="btn btn-success approve-btn" data-user-id="' + reg.id + '">Approve</button> ' +
+                   '<button class="btn btn-danger reject-btn" data-user-id="' + reg.id + '">Reject</button>';
+        } else {
+          actions = '<span>No actions available</span>';
+        }
+        
+        tableData.push([
+          reg.email || '',
+          reg.full_name || '',
+          reg.created_date ? new Date(reg.created_date).toLocaleDateString() : '',
+          statusSpan.outerHTML,
+          actions
+        ]);
+      }
+      
+      // Initialize DataTable
+      window.registrationDataTable = $('#registrationTable').DataTable({
+        data: tableData,
+        columns: [
+          { title: 'Email' },
+          { title: 'Full Name' },
+          { title: 'Request Date' },
+          { title: 'Status', orderable: false },
+          { title: 'Actions', orderable: false }
+        ],
+        responsive: true,
+        pageLength: 10,
+        language: {
+          emptyTable: 'No pending registrations'
+        }
+      });
+      
+      // Add event delegation for approve/reject buttons
+      $('#registrationTable').off('click', '.approve-btn, .reject-btn');
+      $('#registrationTable').on('click', '.approve-btn', function(e) {
+        e.preventDefault();
+        var userId = $(this).data('user-id');
+        approveRegistration(userId);
+      });
+      
+      $('#registrationTable').on('click', '.reject-btn', function(e) {
+        e.preventDefault();
+        var userId = $(this).data('user-id');
+        rejectRegistration(userId);
+      });
+    }
+
+    function approveRegistration(registrationId) {
+      console.log('Approving registration ID:', registrationId);
+      
+      if (!confirm('Are you sure you want to approve this registration?')) {
+        return;
+      }
+      
+      fetch('/admin/registration_approve', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({registration_id: registrationId})
+      })
+      .then(function(response) { 
+        console.log('Approve response:', response);
+        return response.json(); 
+      })
+      .then(function(result) {
+        console.log('Approve result:', result);
+        if (result.status === 'success') {
+          alert('Registration approved successfully');
+          loadPendingRegistrations();
+        } else {
+          alert('Error approving registration: ' + result.message);
+        }
+      })
+      .catch(function(error) {
+        console.error('Error:', error);
+        alert('Error approving registration');
+      });
+    }
+
+    function rejectRegistration(registrationId) {
+      console.log('Rejecting registration ID:', registrationId);
+      
+      if (!confirm('Are you sure you want to reject this registration? The user will be completely deleted from the database.')) {
+        return;
+      }
+      
+      fetch('/admin/registration_reject', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          registration_id: registrationId
+        })
+      })
+      .then(function(response) { 
+        console.log('Reject response:', response);
+        return response.json(); 
+      })
+      .then(function(result) {
+        console.log('Reject result:', result);
+        if (result.status === 'success') {
+          alert('Registration rejected successfully');
+          loadPendingRegistrations();
+        } else {
+          alert('Error rejecting registration: ' + result.message);
+        }
+      })
+      .catch(function(error) {
+        console.error('Error:', error);
+        alert('Error rejecting registration');
+      });
+    }
+
+    function refreshRegistrations() {
+      loadPendingRegistrations();
+    }
+    //]]>
+  </script>
+  
+  <!-- jQuery and DataTables JS -->
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+  <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+  <script src="https://cdn.datatables.net/1.13.6/js/dataTables.bootstrap5.min.js"></script>
+</body>
+</html>
