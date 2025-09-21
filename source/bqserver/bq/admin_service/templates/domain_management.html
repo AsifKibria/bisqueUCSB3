@@ -11,25 +11,331 @@
   
   <!-- Fix for templates that do not create html in the body -->
   <style type="text/css">
+    /* ExtJS 4 Style Theme */
     #content { margin: 0px; }
-    body { background-color: #FAFAFA !important; }
-    .domain-management { padding: 20px; }
-    .card { margin-bottom: 20px; border: 1px solid #ddd; border-radius: 8px; }
-    .card-header { background-color: #f8f9fa; padding: 15px; border-bottom: 1px solid #ddd; }
-    .card-body { padding: 15px; }
-    .form-label { font-weight: bold; }
-    .btn { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; margin-right: 5px; }
-    .btn-primary { background-color: #007bff; color: white; }
-    .btn-danger { background-color: #dc3545; color: white; }
-    .btn-secondary { background-color: #6c757d; color: white; }
-    .btn-outline-primary { background-color: transparent; color: #007bff; border: 1px solid #007bff; }
-    .table { width: 100%; border-collapse: collapse; }
-    .table th, .table td { padding: 8px; border: 1px solid #ddd; }
-    .table th { background-color: #f8f9fa; }
-    .row { display: flex; }
-    .col-md-6 { flex: 0 0 50%; max-width: 50%; padding: 0 15px; }
-    .form-control { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
-    .mb-3 { margin-bottom: 1rem; }
+    body {
+      background-color: #f5f5f5;
+      font-family: 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+      font-size: 13px;
+      color: #333;
+      margin: 0;
+      padding: 0;
+    }
+    .domain-management {
+      padding: 20px;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    /* Panel styling - ExtJS 4 style */
+    .card {
+      margin-bottom: 20px;
+      border: 1px solid #d0d0d0;
+      border-radius: 3px;
+      background-color: #fff;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    .card-header {
+      background: linear-gradient(to bottom, #f9f9f9, #e8e8e8);
+      padding: 10px 15px;
+      border-bottom: 1px solid #d0d0d0;
+      font-weight: bold;
+      color: #333;
+    }
+    .card-body {
+      padding: 15px;
+    }
+
+    /* Form styling - ExtJS 4 style */
+    .form-label {
+      font-weight: bold;
+      color: #333;
+      margin-bottom: 5px;
+      display: block;
+    }
+    .form-control {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #c0c0c0;
+      border-radius: 3px;
+      background-color: #fff;
+      font-size: 13px;
+      color: #333;
+      transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+      box-shadow: inset 0 1px 2px rgba(0,0,0,0.1);
+      min-height: 36px;
+    }
+    .form-control:focus {
+      outline: none;
+      border-color: #3892d3;
+      box-shadow: 0 0 0 2px rgba(56, 146, 211, 0.2), inset 0 1px 2px rgba(0,0,0,0.1);
+      background-color: #fdfdfe;
+    }
+    .form-control:hover {
+      border-color: #a0a0a0;
+    }
+    .form-control::placeholder {
+      color: #999;
+      font-style: italic;
+    }
+    .mb-3 {
+      margin-bottom: 15px;
+    }
+
+    /* Button styling - ExtJS 4 style */
+    .btn {
+      padding: 6px 12px;
+      border: 1px solid transparent;
+      border-radius: 3px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: normal;
+      text-align: center;
+      vertical-align: middle;
+      margin-right: 5px;
+      transition: all 0.15s ease-in-out;
+    }
+    .btn-primary {
+      background-color: #3892d3;
+      border-color: #3892d3;
+      color: #fff;
+    }
+    .btn-primary:hover {
+      background-color: #2d7cb8;
+      border-color: #2d7cb8;
+    }
+    .btn-danger {
+      background-color: #d32f2f;
+      border-color: #d32f2f;
+      color: #fff;
+    }
+    .btn-danger:hover {
+      background-color: #b71c1c;
+      border-color: #b71c1c;
+    }
+    .btn-secondary {
+      background-color: #f5f5f5;
+      border-color: #d0d0d0;
+      color: #333;
+    }
+    .btn-secondary:hover {
+      background-color: #e8e8e8;
+      border-color: #b0b0b0;
+    }
+    .btn-outline-primary {
+      background-color: transparent;
+      border-color: #3892d3;
+      color: #3892d3;
+    }
+    .btn-outline-primary:hover {
+      background-color: #3892d3;
+      color: #fff;
+    }
+
+    /* Table styling - ExtJS 4 grid style */
+    .table {
+      background-image: none;
+      width: 100%;
+      border-collapse: collapse;
+      border: 1px solid #d0d0d0;
+      background-color: #fff;
+    }
+    .table th {
+      background: linear-gradient(to bottom, #f9f9f9, #e8e8e8);
+      border: 1px solid #d0d0d0;
+      padding: 8px 12px;
+      font-weight: bold;
+      color: #333;
+      text-align: left;
+      font-size: 13px;
+    }
+    .table td {
+      border: 1px solid #d0d0d0;
+      padding: 8px 12px;
+      font-size: 13px;
+      color: #333;
+    }
+    .table tbody tr:nth-child(even) {
+      background-color: #fafafa;
+    }
+    .table tbody tr:hover {
+      background-color: #e8f4fd;
+    }
+
+    /* Layout */
+    .row {
+      display: flex;
+      margin: 0 -10px;
+    }
+    .col-md-6 {
+      flex: 0 0 50%;
+      max-width: 50%;
+      padding: 0 10px;
+    }
+
+    /* Typography */
+    h1 {
+      color: #333;
+      font-size: 24px;
+      font-weight: bold;
+      margin-bottom: 20px;
+      padding: 0;
+    }
+    h3 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: bold;
+      color: #333;
+    }
+
+    /* DataTables specific styling */
+    .dataTables_wrapper .dataTables_length,
+    .dataTables_wrapper .dataTables_filter,
+    .dataTables_wrapper .dataTables_info,
+    .dataTables_wrapper .dataTables_paginate {
+      font-size: 13px !important;
+      color: #333 !important;
+      margin: 10px 0 !important;
+    }
+    .dataTables_wrapper .dataTables_length select,
+    .dataTables_wrapper .dataTables_filter input {
+      border: 1px solid #d0d0d0 !important;
+      border-radius: 3px !important;
+      padding: 4px 6px !important;
+      font-size: 13px !important;
+    }
+    .dataTables_wrapper .dataTables_paginate .paginate_button {
+      padding: 4px 8px !important;
+      margin: 0 2px !important;
+      border: 1px solid #d0d0d0 !important;
+      border-radius: 3px !important;
+      background: #f5f5f5 !important;
+      color: #333 !important;
+      cursor: pointer !important;
+      font-size: 13px !important;
+    }
+    .dataTables_wrapper .dataTables_paginate .paginate_button:hover {
+      background: #e8e8e8 !important;
+      border-color: #b0b0b0 !important;
+    }
+    .dataTables_wrapper .dataTables_paginate .paginate_button.current {
+      background: #3892d3 !important;
+      border-color: #3892d3 !important;
+      color: #fff !important;
+    }
+    
+    /* Sorting indicators */
+    .dataTables_wrapper table thead th.sorting {
+      background-image: none !important;
+      position: relative !important;
+      cursor: pointer !important;
+    }
+    .dataTables_wrapper table thead th.sorting:after,
+    .dataTables_wrapper table thead th.sorting_asc:after,
+    .dataTables_wrapper table thead th.sorting_desc:after {
+      content: '' !important;
+      position: absolute !important;
+      right: 8px !important;
+      top: 50% !important;
+      transform: translateY(-50%) !important;
+      width: 0 !important;
+      height: 0 !important;
+      border-left: 4px solid transparent !important;
+      border-right: 4px solid transparent !important;
+      opacity: 0.5 !important;
+    }
+    .dataTables_wrapper table thead th.sorting:after {
+      border-top: 4px solid #999 !important;
+      border-bottom: none !important;
+      top: 40% !important;
+    }
+    .dataTables_wrapper table thead th.sorting_asc:after {
+      border-bottom: 4px solid #3892d3 !important;
+      border-top: none !important;
+      top: 60% !important;
+      opacity: 1 !important;
+    }
+    .dataTables_wrapper table thead th.sorting_desc:after {
+      border-top: 4px solid #3892d3 !important;
+      border-bottom: none !important;
+      top: 40% !important;
+      opacity: 1 !important;
+    }
+
+    /* Icon buttons with tooltips */
+    .btn-icon {
+      padding: 6px 8px;
+      border: 1px solid transparent;
+      border-radius: 3px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: normal;
+      text-align: center;
+      vertical-align: middle;
+      margin-right: 5px;
+      transition: all 0.15s ease-in-out;
+      position: relative;
+      display: inline-block;
+      width: 32px;
+      height: 28px;
+      line-height: 16px;
+    }
+    .btn-icon:hover {
+      transform: translateY(-1px);
+    }
+    .btn-icon:before {
+      font-size: 14px;
+      font-weight: bold;
+    }
+    .btn-icon-danger {
+      background-color: #d32f2f;
+      border-color: #d32f2f;
+      color: #fff;
+    }
+    .btn-icon-danger:hover {
+      background-color: #b71c1c;
+      border-color: #b71c1c;
+    }
+    .btn-icon-danger:before {
+      content: '×';
+    }
+    
+    /* Tooltip styles */
+    .tooltip {
+      position: relative;
+      display: inline-block;
+    }
+    .tooltip .tooltip-text {
+      visibility: hidden;
+      width: 120px;
+      background-color: #333;
+      color: #fff;
+      text-align: center;
+      border-radius: 3px;
+      padding: 5px;
+      position: absolute;
+      z-index: 1;
+      bottom: 125%;
+      left: 50%;
+      margin-left: -60px;
+      opacity: 0;
+      transition: opacity 0.3s;
+      font-size: 12px;
+    }
+    .tooltip:hover .tooltip-text {
+      visibility: visible;
+      opacity: 1;
+    }
+    .tooltip .tooltip-text::after {
+      content: '';
+      position: absolute;
+      top: 100%;
+      left: 50%;
+      margin-left: -5px;
+      border-width: 5px;
+      border-style: solid;
+      border-color: #333 transparent transparent transparent;
+    }
   </style>
 
   <script type="text/javascript" id="config">
@@ -140,7 +446,7 @@
       var tableData = [];
       for (var i = 0; i < domains.length; i++) {
         var domain = domains[i];
-        var deleteBtn = '<button class="btn btn-danger" onclick="deleteDomain(' + domain.id + ')">Delete</button>';
+        var deleteBtn = '<div class="tooltip"><button class="btn-icon btn-icon-danger" onclick="deleteDomain(' + domain.id + ')" title="Delete Domain"></button><span class="tooltip-text">Delete Domain</span></div>';
         
         tableData.push([
           domain.domain || '',
