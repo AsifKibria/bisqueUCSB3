@@ -396,7 +396,6 @@
         <h3>Users Awaiting Verification</h3>
         <div class="header-actions">
           <a href="/admin/domain_management" class="btn btn-secondary">Manage Domains</a>
-          <a href="/admin/" class="btn btn-outline-primary">Back to Admin</a>
           <button class="btn btn-secondary" onclick="refreshRegistrations()">Refresh</button>
         </div>
       </div>
@@ -432,12 +431,12 @@
           if (data.status === 'success') {
             displayRegistrations(data.registrations);
           } else {
-            alert('Error loading pending registrations: ' + data.message);
+            Ext.Msg.alert('Error', 'Error loading pending registrations: ' + data.message);
           }
         })
         .catch(function(error) {
           console.error('Error:', error);
-          alert('Error loading pending registrations');
+          Ext.Msg.alert('Error', 'Error loading pending registrations');
         });
     }
 
@@ -508,68 +507,68 @@
     function approveRegistration(registrationId) {
       console.log('Approving registration ID:', registrationId);
       
-      if (!confirm('Are you sure you want to approve this registration?')) {
-        return;
-      }
-      
-      fetch('/admin/registration_approve', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({registration_id: registrationId})
-      })
-      .then(function(response) { 
-        console.log('Approve response:', response);
-        return response.json(); 
-      })
-      .then(function(result) {
-        console.log('Approve result:', result);
-        if (result.status === 'success') {
-          alert('Registration approved successfully');
-          loadPendingRegistrations();
-        } else {
-          alert('Error approving registration: ' + result.message);
+      Ext.Msg.confirm('Confirm Approval', 'Are you sure you want to approve this registration?', function(btn) {
+        if (btn === 'yes') {
+          fetch('/admin/registration_approve', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({registration_id: registrationId})
+          })
+          .then(function(response) { 
+            console.log('Approve response:', response);
+            return response.json(); 
+          })
+          .then(function(result) {
+            console.log('Approve result:', result);
+            if (result.status === 'success') {
+              Ext.Msg.alert('Success', 'Registration approved successfully');
+              loadPendingRegistrations();
+            } else {
+              Ext.Msg.alert('Error', 'Error approving registration: ' + result.message);
+            }
+          })
+          .catch(function(error) {
+            console.error('Error:', error);
+            Ext.Msg.alert('Error', 'Error approving registration');
+          });
         }
-      })
-      .catch(function(error) {
-        console.error('Error:', error);
-        alert('Error approving registration');
       });
     }
 
     function rejectRegistration(registrationId) {
       console.log('Rejecting registration ID:', registrationId);
       
-      if (!confirm('Are you sure you want to reject this registration? The user will be completely deleted from the database.')) {
-        return;
-      }
-      
-      fetch('/admin/registration_reject', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          registration_id: registrationId
-        })
-      })
-      .then(function(response) { 
-        console.log('Reject response:', response);
-        return response.json(); 
-      })
-      .then(function(result) {
-        console.log('Reject result:', result);
-        if (result.status === 'success') {
-          alert('Registration rejected successfully');
-          loadPendingRegistrations();
-        } else {
-          alert('Error rejecting registration: ' + result.message);
+      Ext.Msg.confirm('Confirm Rejection', 'Are you sure you want to reject this registration? The user will be completely deleted from the database.', function(btn) {
+        if (btn === 'yes') {
+          fetch('/admin/registration_reject', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              registration_id: registrationId
+            })
+          })
+          .then(function(response) { 
+            console.log('Reject response:', response);
+            return response.json(); 
+          })
+          .then(function(result) {
+            console.log('Reject result:', result);
+            if (result.status === 'success') {
+              Ext.Msg.alert('Success', 'Registration rejected successfully');
+              loadPendingRegistrations();
+            } else {
+              Ext.Msg.alert('Error', 'Error rejecting registration: ' + result.message);
+            }
+          })
+          .catch(function(error) {
+            console.error('Error:', error);
+            Ext.Msg.alert('Error', 'Error rejecting registration');
+          });
         }
-      })
-      .catch(function(error) {
-        console.error('Error:', error);
-        alert('Error rejecting registration');
       });
     }
 
