@@ -405,6 +405,12 @@ class AdminController(ServiceController):
                     resource_name='email_verified'
                 ).first()
                 
+                # Check for admin approval status
+                approved_tag = session.query(Tag).filter_by(
+                    resource_parent_id=user.id,
+                    resource_name='is_approved'
+                ).first()
+                
                 rejected_tag = session.query(Tag).filter_by(
                     resource_parent_id=user.id,
                     resource_name='registration_rejected'
@@ -424,8 +430,8 @@ class AdminController(ServiceController):
                     user_data['rejected_date'] = rejected_tag.ts.isoformat() if rejected_tag.ts else None
                     user_data['status'] = 'rejected'
                     rejected_users.append(user_data)
-                elif verified_tag and verified_tag.value == 'true':
-                    user_data['approved_date'] = verified_tag.ts.isoformat() if verified_tag.ts else None
+                elif verified_tag and verified_tag.value == 'true' and approved_tag and approved_tag.value == 'true':
+                    user_data['approved_date'] = approved_tag.ts.isoformat() if approved_tag.ts else None
                     user_data['status'] = 'approved'
                     approved_users.append(user_data)
                 else:
@@ -482,6 +488,13 @@ class AdminController(ServiceController):
             verified_tag.owner = user
             DBSession.add(verified_tag)
             
+            # Add is_approved tag for unified approval system
+            approved_tag = Tag(parent=user)
+            approved_tag.name = 'is_approved'
+            approved_tag.value = 'true'
+            approved_tag.owner = user
+            DBSession.add(approved_tag)
+            
             # Add verification timestamp like EmailVerificationService does
             from datetime import datetime, timezone
             verified_time_tag = Tag(parent=user)
@@ -489,7 +502,13 @@ class AdminController(ServiceController):
             verified_time_tag.value = datetime.now(timezone.utc).isoformat()
             verified_time_tag.owner = user
             DBSession.add(verified_time_tag)
-            
+
+            approved_time_tag = Tag(parent=user)
+            approved_time_tag.name = 'is_approved_at'
+            approved_time_tag.value = datetime.now(timezone.utc).isoformat()
+            approved_time_tag.owner = user
+            DBSession.add(approved_time_tag)
+
             DBSession.flush()
             
             log.info(f"Admin approved registration for user: {user.resource_name}")
