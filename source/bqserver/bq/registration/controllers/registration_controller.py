@@ -5,6 +5,14 @@ from bq.core.lib.base import BaseController
 from bq.core.model import DBSession
 from bq.core.model.auth import User
 
+# Import domain models for authorization checking
+try:
+    from bq.data_service.model.domain_model import AuthorizedEmailDomain
+    DOMAIN_MODELS_AVAILABLE = True
+except ImportError:
+    DOMAIN_MODELS_AVAILABLE = False
+    AuthorizedEmailDomain = None
+
 # Import email verification conditionally to avoid import errors during service loading
 try:
     from bq.registration.email_verification import (
@@ -66,11 +74,11 @@ class RegistrationController(BaseController):
                     log.warning(
                         f"Email verification disabled due to configuration errors: {config_status['errors']}"
                     )
-                log.info("Users will be automatically verified upon registration")
+                log.info("Users will remain unverified and require admin approval")
         except Exception as e:
             log.warning(f"Failed to initialize email verification service: {e}")
             log.info(
-                "Email verification disabled - users will be automatically verified upon registration"
+                "Email verification disabled - users will remain unverified and require admin approval"
             )
             self.email_service = None
 
@@ -91,7 +99,7 @@ class RegistrationController(BaseController):
                     "errors": ["Email verification service not initialized"],
                 }
             elif method_name == "is_user_verified":
-                return True  # Default to verified if no email service
+                return False  # Default to unverified if no email service - requires admin approval
             elif method_name == "test_smtp_connection":
                 return {"success": False, "error": "Email service not available"}
             elif method_name in [
@@ -112,7 +120,7 @@ class RegistrationController(BaseController):
             if method_name == "is_available":
                 return False
             elif method_name == "is_user_verified":
-                return True  # Default to verified if check fails
+                return False  # Default to unverified if check fails - requires admin approval
             elif method_name in [
                 "generate_verification_token",
                 "send_verification_email",
@@ -121,6 +129,51 @@ class RegistrationController(BaseController):
                 return None  # These need explicit error handling
             else:
                 return None
+
+    def _is_domain_authorized(self, email):
+        """Check if email domain is in authorized domains list"""
+        if not email or '@' not in email:
+            log.warning(f"Invalid email format: {email}")
+            return False
+        
+        domain = email.split('@')[1].lower()
+        
+        try:
+            # Use the domain model to check authorization - pass the full email
+            from bq.data_service.model.domain_model import is_domain_authorized
+            result = is_domain_authorized(email)  # Pass full email, not just domain
+            log.info(f"Domain authorization check for {domain}: {result}")
+            return result
+        except Exception as e:
+            log.error(f"Error checking domain authorization for {domain}: {e}")
+            # For security, default to DENYING registration if check fails
+            # This ensures domain management is properly enforced
+            log.warning(f"Domain authorization check failed, denying registration for security: {e}")
+            return False
+
+    def _create_pending_registration(self, email, username, fullname, password, 
+                                   research_area, institution_affiliation, funding_agency=None):
+        """Create a pending registration request"""
+        try:
+            # Ensure tables exist first
+            from bq.admin_service.controllers.service import ensure_domain_tables
+            ensure_domain_tables()
+            
+            from bq.data_service.model.domain_model import add_pending_registration
+            
+            # Use the helper function to add pending registration
+            success = add_pending_registration(email, fullname, password)
+            
+            if success:
+                log.info(f"Created pending registration for {email}")
+                return True
+            else:
+                log.error(f"Failed to create pending registration for {email}")
+                return False
+                
+        except Exception as e:
+            log.error(f"Failed to create pending registration for {email}: {e}")
+            raise
 
     @expose("bq.registration.templates.index")
     def index(self, **kw):
@@ -194,6 +247,15 @@ class RegistrationController(BaseController):
             existing_user_name = User.by_user_name(username)
             if existing_user_name:
                 return {"status": "error", "message": "This username is already taken"}
+
+            # Check if domain is authorized for registration
+            if not self._is_domain_authorized(email):
+                domain = email.split('@')[1] if '@' in email else 'unknown'
+                log.info(f"Registration attempt from unauthorized domain: {domain}")
+                return {
+                    "status": "error",
+                    "message": f"Registration not allowed for domain '{domain}'. Please contact an administrator to authorize your domain for registration."
+                }
 
             # Validate research area options
             valid_research_areas = [
@@ -375,38 +437,42 @@ class RegistrationController(BaseController):
 
                 except EmailVerificationError as e:
                     log.warning(f"Failed to send verification email to {email}: {e}")
-                    verification_message = " Note: Verification email could not be sent due to email server issues, but your account was created successfully. Please contact an administrator for manual verification."
-                    # Mark user as verified since email failed
-                    self._safe_email_call("mark_user_as_verified", bq_user)
+                    verification_message = " Note: Verification email could not be sent due to email server issues. Your account was created but requires administrator approval. Please contact an administrator for manual verification."
+                    # Do NOT mark user as verified since email failed - leave for admin approval
 
             else:
-                # If email verification is not available, mark user as verified
-                self._safe_email_call("mark_user_as_verified", bq_user)
-
+                # Email verification not available - do NOT auto-verify for domain management
+                # Leave user unverified so admin can manually approve through domain management interface
+                
                 # Provide detailed logging about why verification was skipped
                 if email_verification_status:
                     if not email_verification_status.get("smtp_configured", False):
                         log.info(
-                            f"Email verification skipped for {username}: SMTP not configured"
+                            f"Email verification skipped for {username}: SMTP not configured. User left unverified for admin approval."
                         )
+                        verification_message = " Your account has been created but requires administrator approval since email verification is not configured. Please wait for an administrator to verify your account."
                     elif not email_verification_status.get(
                         "verification_enabled", False
                     ):
                         log.info(
-                            f"Email verification skipped for {username}: verification disabled in config"
+                            f"Email verification skipped for {username}: verification disabled in config. User left unverified for admin approval."
                         )
+                        verification_message = " Your account has been created but requires administrator approval since email verification is disabled. Please wait for an administrator to verify your account."
                     elif email_verification_status.get("errors"):
                         log.info(
-                            f"Email verification skipped for {username}: configuration errors: {email_verification_status['errors']}"
+                            f"Email verification skipped for {username}: configuration errors: {email_verification_status['errors']}. User left unverified for admin approval."
                         )
+                        verification_message = " Your account has been created but requires administrator approval due to email configuration issues. Please wait for an administrator to verify your account."
                     else:
                         log.info(
-                            f"Email verification skipped for {username}: unknown reason"
+                            f"Email verification skipped for {username}: unknown reason. User left unverified for admin approval."
                         )
+                        verification_message = " Your account has been created but requires administrator approval. Please wait for an administrator to verify your account."
                 else:
                     log.warning(
-                        f"Email verification skipped for {username}: failed to get verification status"
+                        f"Email verification skipped for {username}: failed to get verification status. User left unverified for admin approval."
                     )
+                    verification_message = " Your account has been created but requires administrator approval. Please wait for an administrator to verify your account."
 
             return {
                 "status": "success",
@@ -480,7 +546,7 @@ class RegistrationController(BaseController):
 
     @expose()
     def register_redirect(self, **kw):
-        """
+        """    
         Registration endpoint that redirects to login with flash message
         This provides a fallback for non-AJAX registration
         """
@@ -519,6 +585,13 @@ class RegistrationController(BaseController):
             existing_user_name = User.by_user_name(username)
             if existing_user_name:
                 flash("This username is already taken", "error")
+                redirect("/registration/")
+
+            # Check if domain is authorized for registration
+            if not self._is_domain_authorized(email):
+                domain = email.split('@')[1] if '@' in email else 'unknown'
+                log.info(f"Registration attempt from unauthorized domain: {domain}")
+                flash(f"Registration not allowed for domain '{domain}'. Please contact an administrator to authorize your domain for registration.", "error")
                 redirect("/registration/")
 
             # Validate research area options
@@ -668,13 +741,13 @@ class RegistrationController(BaseController):
                     )
             else:
                 log.info(
-                    f"Email verification not available - marking user as verified automatically"
+                    f"Email verification not available - user left unverified for admin approval"
                 )
-                # Mark user as verified when email verification is not available
-                self._safe_email_call("mark_user_as_verified", bq_user)
+                # Do NOT mark user as verified when email verification is not available
+                # User must be manually verified by admin
                 flash(
-                    f"Account created successfully for {fullname}! Please sign in with your new credentials.",
-                    "success",
+                    f"Account created successfully for {fullname}! Your account requires administrator approval before you can sign in. Please wait for verification.",
+                    "info",
                 )
 
             redirect("/client_service/")
@@ -741,6 +814,13 @@ class RegistrationController(BaseController):
             existing_user_name = User.by_user_name(username)
             if existing_user_name:
                 flash("This username is already taken", "error")
+                redirect("/registration/")
+
+            # Check if domain is authorized for registration
+            if not self._is_domain_authorized(email):
+                domain = email.split('@')[1] if '@' in email else 'unknown'
+                log.info(f"Registration attempt from unauthorized domain: {domain}")
+                flash(f"Registration not allowed for domain '{domain}'. Please contact an administrator to authorize your domain for registration.", "error")
                 redirect("/registration/")
 
             # Validate research area options
@@ -882,21 +962,19 @@ class RegistrationController(BaseController):
                     log.error(
                         f"Failed to send verification email to {email}: {send_result}"
                     )
-                    # Mark user as verified if email sending fails
-                    self._safe_email_call("mark_user_as_verified", bq_user)
+                    # Do NOT mark user as verified if email sending fails - require admin approval
                     flash(
-                        f"Account created successfully! Email verification failed, but you can sign in immediately.",
-                        "warning",
+                        f"Account created successfully! Email verification failed - your account requires administrator approval before you can sign in.",
+                        "info",
                     )
             else:
                 log.info(
-                    f"Email verification not available - marking user as verified automatically"
+                    f"Email verification not available - user left unverified for admin approval"
                 )
-                # Mark user as verified when email verification is not available
-                self._safe_email_call("mark_user_as_verified", bq_user)
+                # Do NOT mark user as verified when email verification is not available
                 flash(
-                    f"Account created successfully! Please sign in with your new account.",
-                    "success",
+                    f"Account created successfully! Your account requires administrator approval before you can sign in.",
+                    "info",
                 )
 
             redirect("/client_service/")

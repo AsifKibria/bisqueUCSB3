@@ -77,6 +77,7 @@ from bq import module_service
 from bq.util.urlutil import update_url
 from bq.util.xmldict import d2xml
 from bq.exceptions import ConfigurationError
+from bq.data_service.model.tag_model import Tag
 
 
 from bq import data_service
@@ -99,6 +100,56 @@ class AuthenticationServer(ServiceController):
     service_type = "auth_service"
     providers = {}
 
+    def _is_domain_authorized(self, email):
+        """Check if email domain is in authorized domains list for social login"""
+        log.error("Checking domain authorization for email: %s", email)
+        if not email or '@' not in email:
+            return False
+        
+        domain = email.split('@')[1].lower()
+        
+        try:
+            # Ensure domain tables exist
+            from bq.admin_service.controllers.service import ensure_domain_tables
+            if not ensure_domain_tables():
+                # If tables can't be created (e.g., during setup), allow all access
+                log.warning("Domain tables not available, allowing all access")
+                return True
+            
+            from bq.data_service.model.domain_model import is_domain_authorized
+            return is_domain_authorized(email)
+            
+        except Exception as e:
+            # If domain model doesn't exist or there's an error, default to allow all
+            # This maintains backward compatibility
+            log.warning(f"Domain authorization check failed, allowing access: {e}")
+            return True
+
+    def _is_approved(self, bq_user):
+        """Check if user has been approved by admin for login"""
+        approved_tag = (
+            DBSession.query(Tag)
+            .filter(
+                Tag.parent == bq_user,
+                Tag.resource_name == "is_approved",
+                Tag.resource_value == "true",
+            )
+            .first()
+        )
+        return True if approved_tag else False
+    
+    def _is_email_verified(self, bq_user):
+        """Check if user has verified their email address"""
+        verified_tag = (
+            DBSession.query(Tag)
+            .filter(
+                Tag.parent == bq_user,
+                Tag.resource_name == "email_verified",
+                Tag.resource_value == "true",
+            )
+            .first()
+        )
+        return True if verified_tag else False
 
     @classmethod
     def login_map(cls):
@@ -216,6 +267,7 @@ class AuthenticationServer(ServiceController):
                     if bq_user:
                         # Check if user is verified
                         is_verified = email_service.is_user_verified(bq_user)
+                        is_approved = self._is_approved(bq_user)
                         if not is_verified:
                             # User is not verified - deny login completely
                             log.warning(f"Login denied for unverified user: {userid}")
@@ -224,12 +276,40 @@ class AuthenticationServer(ServiceController):
                             flash(_('Your email address must be verified before you can sign in. Please check your email for the verification link or request a new one.'), 'error')
                             redirect('/auth_service/logout_handler?came_from=/registration/resend_verification')
                             return  # This should never be reached due to redirect
-                        else:
-                            log.info(f"Email verified user logged in: {userid}")
+                        if not is_approved:
+                            # User is not approved by admin - deny login
+                            log.warning(f"Login denied for unapproved user: {userid}")
+                            
+                            # Force logout by redirecting to logout handler first
+                            flash(_('Your account requires administrator approval before you can sign in. Please contact an administrator.'), 'error')
+                            redirect('/auth_service/logout_handler?came_from=/client_service/')
+                            return  # This should never be reached due to redirect
+                        log.info(f"Email verified user logged in: {userid}")
                     else:
                         log.warning(f"User not found in database during email verification check: {userid}")
                 else:
-                    log.debug(f"Email verification not available - allowing login for: {userid}")
+                    # Email verification not available - check if user is manually verified by admin
+                    log.debug(f"Email verification not available - checking manual verification for: {userid}")
+                    bq_user = DBSession.query(BQUser).filter(BQUser.resource_name == userid).first()
+                    if bq_user:                        
+                        verified_tag = self._is_email_verified(bq_user)
+                        approved_tag = self._is_approved(bq_user)
+                        
+                        log.error(f"Unified approval check for user {userid}, verified_tag: {verified_tag}, approved_tag: {approved_tag}")
+                        
+                        if not verified_tag or not approved_tag:
+                            # User is not fully approved - deny login
+                            log.warning(f"Login denied for unapproved user (no SMTP): {userid}")
+                            flash(_('Your account requires administrator approval before you can sign in. Please contact an administrator.'), 'error')
+                            redirect('/auth_service/logout_handler?came_from=/client_service/')
+                            return
+                        else:
+                            log.info(f"Manually verified user logged in: {userid}")
+                    else:
+                        log.warning(f"User not found during manual verification check: {userid}")
+                        flash(_('Account not found. Please contact an administrator.'), 'error')
+                        redirect('/auth_service/logout_handler?came_from=/client_service/')
+                        return
                 
         except (ImportError, AttributeError, NameError) as import_error:
             # Only catch import/attribute errors, not redirects
@@ -542,6 +622,15 @@ class AuthenticationServer(ServiceController):
             
             log.info(f"Firebase token verified for {email} (provider: {provider_info})")
             
+            # Check if email domain is authorized for social login
+            if not self._is_domain_authorized(email):
+                domain = email.split('@')[1] if '@' in email else 'unknown'
+                log.warning(f"Social login attempt from unauthorized domain: {domain}")
+                return {
+                    'status': 'error',
+                    'message': f'Social login is not authorized for domain: {domain}. Please contact an administrator.'
+                }
+            
             # Check if user exists in BisQue
             from bq.data_service.model import BQUser
             from bq.data_service.model.tag_model import DBSession, Tag
@@ -578,6 +667,12 @@ class AuthenticationServer(ServiceController):
                     return {'status': 'error', 'message': 'Failed to register user'}
             
             if bq_user and username:
+                if not self._is_approved(bq_user):
+                    log.warning(f"Login denied for unapproved Firebase user: {username}")
+                    return {
+                        'status': 'error',
+                        'message': 'Your account requires administrator approval before you can sign in. Please contact an administrator.'
+                    }
                 # Store Firebase credentials temporarily in session for authentication
                 session['firebase_pending_auth'] = {
                     'username': username,

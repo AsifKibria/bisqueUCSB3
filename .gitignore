@@ -237,3 +237,4 @@ source/SampleData/
 source/images/
 
 source/*-firebase-adminsdk*.json
+site.cfg copy.default

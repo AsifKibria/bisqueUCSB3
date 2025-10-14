@@ -41,6 +41,7 @@
 ## POSSIBILITY OF SUCH DAMAGE.                                               ##
 ##                                                                           ##
 ###############################################################################
+# Updated by Wahid Sadique Koly at 2025-09-21
 """
 SYNOPSIS
 ========
@@ -57,7 +58,17 @@ import logging
 import os
 import string
 #from datetime import datetime
+from datetime import datetime, timezone
 from urllib.parse import  unquote
+
+# Import domain models for admin operations
+try:
+    from bq.data_service.model.domain_model import AuthorizedEmailDomain, PendingUserRegistration
+    DOMAIN_MODELS_AVAILABLE = True
+except ImportError:
+    DOMAIN_MODELS_AVAILABLE = False
+    AuthorizedEmailDomain = None
+    PendingUserRegistration = None
 #import io
 #import itertools
 #import mmap
@@ -77,8 +88,42 @@ from bq.client_service.controllers import notify_service
 from bq.core.identity import get_username, set_current_user
 from bq.core.model import DBSession, Group, User  # , Visit
 from bq.core.service import ServiceController
-from bq.data_service.model import BQUser, Image, TaggableAcl
+from bq.data_service.model import BQUser, Image, TaggableAcl, Tag, current_session
 from bq.data_service.controllers.formats import find_inputer, find_formatter
+
+def ensure_domain_tables():
+    """Check if domain management tables exist (they should be created by Alembic migrations during setup)"""
+    try:
+        from bq.core.model import DBSession
+        from sqlalchemy import text
+        from sqlalchemy.exc import OperationalError, ProgrammingError
+        
+        # Check if database is ready
+        try:
+            # Test database connection
+            DBSession.execute(text("SELECT 1"))
+        except (OperationalError, ProgrammingError) as e:
+            log.warning(f"Database not ready: {e}")
+            return False
+        except AttributeError:
+            # DBSession might not be initialized yet during setup
+            log.warning("DBSession not initialized yet")
+            return False
+        
+        # Check if authorized_email_domains table exists
+        try:
+            DBSession.execute(text("SELECT 1 FROM authorized_email_domains LIMIT 1"))
+            log.info("Domain management table found")
+            return True
+        except (OperationalError, ProgrammingError):
+            log.error("Domain management table not found! Please run 'bq-admin setup database' or 'alembic upgrade head' to create it.")
+            return False
+        
+    except Exception as e:
+        log.warning(f"Error checking domain management table: {e}")
+        return False
+#from bq.admin_service.controllers.domain_management import DomainManagementController
+#from bq.admin_service.controllers.modern_domain_management import ModernDomainManagementController
 #from bq.util.bisquik2db import bisquik2db, db2tree
 from bq.util.paths import data_path
 from bq.util import urlutil
@@ -150,8 +195,384 @@ class AdminController(ServiceController):
     def manager(self):
         return dict()
 
+    @expose("bq.admin_service.templates.domain_management")  
+    def domain_management(self):
+        """Domain management page"""
+        return dict()
 
-    @expose(content_type='text/xml')
+    # Domain Management API Endpoints
+    @expose(content_type='application/json')
+    def domains_list(self):
+        """API endpoint to list all authorized domains"""
+        try:
+            # Ensure tables exist
+            if not ensure_domain_tables():
+                return json.dumps({
+                    'status': 'error',
+                    'message': 'Domain management tables not found. Please run "bq-admin setup database" or "alembic upgrade head".'
+                })
+                
+            from bq.data_service.model.domain_model import get_authorized_domains
+            domains = get_authorized_domains()
+            domain_list = [domain.to_dict() for domain in domains]
+            
+            return json.dumps({
+                'status': 'success',
+                'domains': domain_list
+            })
+        except Exception as e:
+            log.error(f"Error listing domains: {e}")
+            return json.dumps({
+                'status': 'error',
+                'message': str(e)
+            })
+
+    @expose(content_type='application/json')
+    def domain_add(self):
+        """Add a new authorized domain"""
+        if request.method != 'POST':
+            response.status = 405
+            return json.dumps({'status': 'error', 'message': 'Method not allowed'})
+        
+        try:
+            # Ensure tables exist
+            if not ensure_domain_tables():
+                return json.dumps({
+                    'status': 'error',
+                    'message': 'Domain management tables not found. Please run "bq-admin setup database" or "alembic upgrade head".'
+                })
+                
+            from bq.data_service.model.domain_model import add_authorized_domain
+            domain = request.POST.get('domain', '').strip().lower()
+            description = request.POST.get('description', '').strip()
+            
+            if not domain:
+                return json.dumps({'status': 'error', 'message': 'Domain is required'})
+            
+            # Add domain using helper function
+            if add_authorized_domain(domain, description):
+                return json.dumps({
+                    'status': 'success',
+                    'message': f'Domain {domain} added successfully'
+                })
+            else:
+                return json.dumps({
+                    'status': 'error', 
+                    'message': 'Failed to add domain (may already exist)'
+                })
+            
+        except Exception as e:
+            log.exception("Error adding domain")
+            return json.dumps({'status': 'error', 'message': f'Failed to add domain: {str(e)}'})
+
+    @expose(content_type='application/json')
+    def domain_delete(self, id):
+        """Delete a domain"""
+        if request.method != 'POST':
+            response.status = 405
+            return json.dumps({'status': 'error', 'message': 'Method not allowed'})
+        
+        try:
+            # Ensure tables exist
+            if not ensure_domain_tables():
+                return json.dumps({
+                    'status': 'error',
+                    'message': 'Database tables could not be created'
+                })
+                
+            from bq.data_service.model.domain_model import delete_authorized_domain
+            
+            if delete_authorized_domain(id):
+                return json.dumps({
+                    'status': 'success',
+                    'message': 'Domain deleted successfully'
+                })
+            else:
+                return json.dumps({
+                    'status': 'error',
+                    'message': 'Failed to delete domain'
+                })
+            
+        except Exception as e:
+            log.exception("Error deleting domain")
+            return json.dumps({'status': 'error', 'message': f'Failed to delete domain: {str(e)}'})
+
+    # User verification methods (using existing BisQue email verification system)
+    
+    @expose(content_type='application/json')
+    def unverified_users_list(self):
+        """List all unverified users (no email_verified tag)"""
+        try:
+            # Find users without email_verified tag
+            users_query = current_session.query(BQUser).filter(BQUser.resource_value != None)
+            
+            unverified_users = []
+            for user in users_query:
+                # Check if user has email_verified tag
+                verified_tag = current_session.query(Tag).filter_by(
+                    resource_uniq=user.resource_uniq,
+                    resource_name='email_verified'
+                ).first()
+                
+                if not verified_tag or verified_tag.value != 'true':
+                    unverified_users.append({
+                        'id': user.id,
+                        'resource_uniq': user.resource_uniq,
+                        'email': user.resource_value,
+                        'display_name': user.display_name,
+                        'created': user.ts.isoformat() if user.ts else None,
+                        'verified': verified_tag.value if verified_tag else 'false'
+                    })
+            
+            return json.dumps({
+                'status': 'success',
+                'users': unverified_users
+            })
+            
+        except Exception as e:
+            log.exception("Error getting unverified users")
+            return json.dumps({'status': 'error', 'message': str(e)})
+    
+    @expose(content_type='application/json')
+    def verify_user(self):
+        """Verify a user by adding email_verified tag"""
+        if request.method != 'POST':
+            response.status = 405
+            return json.dumps({'status': 'error', 'message': 'Method not allowed'})
+        
+        try:
+            user_id = request.POST.get('user_id')
+            if not user_id:
+                return json.dumps({'status': 'error', 'message': 'User ID is required'})
+            
+            user = current_session.query(BQUser).filter_by(id=int(user_id)).first()
+            
+            if not user:
+                return json.dumps({'status': 'error', 'message': 'User not found'})
+            
+            # Check if user already has email_verified tag
+            verified_tag = current_session.query(Tag).filter_by(
+                resource_parent_id=user.id,
+                resource_name='email_verified'
+            ).first()
+            
+            if verified_tag:
+                verified_tag.value = 'true'
+            else:
+                # Create new verification tag
+                verified_tag = Tag(parent=user)
+                verified_tag.name = 'email_verified'
+                verified_tag.value = 'true'
+                verified_tag.owner = user
+                current_session.add(verified_tag)
+            
+            # TurboGears will handle the commit automatically
+            
+            return json.dumps({
+                'status': 'success',
+                'message': f'User {user.resource_value} verified successfully'
+            })
+            
+        except Exception as e:
+            log.exception("Error verifying user")
+            return json.dumps({'status': 'error', 'message': str(e)})
+
+    # Registration approval system endpoints
+    
+    @expose("bq.admin_service.templates.pending_registrations")
+    def pending_registrations(self):
+        """Show pending registrations page"""
+        return dict()
+    
+    @expose(template='json')
+    def pending_list(self, **kw):
+        """List pending user registrations"""
+        try:
+            # Use current_session instead of creating new DBSession
+            session = current_session
+            # Query users who have email addresses but no email_verified tag
+            users_query = session.query(BQUser).filter(BQUser.resource_value != None)
+            users = users_query.all()
+            
+            pending_users = []
+            approved_users = []
+            rejected_users = []
+            
+            for user in users:
+                # Check for email verification status
+                verified_tag = session.query(Tag).filter_by(
+                    resource_parent_id=user.id,
+                    resource_name='email_verified'
+                ).first()
+                
+                # Check for admin approval status
+                approved_tag = session.query(Tag).filter_by(
+                    resource_parent_id=user.id,
+                    resource_name='is_approved'
+                ).first()
+                
+                rejected_tag = session.query(Tag).filter_by(
+                    resource_parent_id=user.id,
+                    resource_name='registration_rejected'
+                ).first()
+                
+                user_data = {
+                    'id': user.id,
+                    'username': user.resource_name,
+                    'full_name': user.resource_name,  # Use username as full_name for now
+                    'email': user.resource_value,
+                    'created': user.ts.isoformat() if user.ts else None,
+                    'created_date': user.ts.isoformat() if user.ts else None,  # For frontend compatibility
+                }
+                
+                if rejected_tag:
+                    user_data['rejection_reason'] = rejected_tag.value
+                    user_data['rejected_date'] = rejected_tag.ts.isoformat() if rejected_tag.ts else None
+                    user_data['status'] = 'rejected'
+                    rejected_users.append(user_data)
+                elif verified_tag and verified_tag.value == 'true' and approved_tag and approved_tag.value == 'true':
+                    user_data['approved_date'] = approved_tag.ts.isoformat() if approved_tag.ts else None
+                    user_data['status'] = 'approved'
+                    approved_users.append(user_data)
+                else:
+                    user_data['status'] = 'pending'
+                    pending_users.append(user_data)
+            
+            return {
+                'status': 'success',
+                'pending': pending_users,
+                'approved': approved_users,
+                'rejected': rejected_users,
+                'registrations': pending_users  # For frontend compatibility
+            }
+            
+        except Exception as e:
+            log.error(f"Error retrieving pending registrations: {e}")
+            return {'error': str(e)}
+    
+    @expose(content_type='application/json')
+    def registration_approve(self):
+        """Approve a user registration by adding email_verified tag exactly like EmailVerificationService"""
+        if request.method != 'POST':
+            response.status = 405
+            return json.dumps({'status': 'error', 'message': 'Method not allowed'})
+        
+        try:
+            # Handle JSON request body
+            import json as json_module
+            if hasattr(request, 'json') and request.json:
+                data = request.json
+            else:
+                body = request.body.read() if hasattr(request.body, 'read') else request.body
+                if isinstance(body, bytes):
+                    body = body.decode('utf-8')
+                data = json_module.loads(body) if body else {}
+            
+            registration_id = data.get('registration_id')
+            
+            log.info(f"Approve request: registration_id={registration_id}, data={data}")
+            
+            if not registration_id:
+                return json.dumps({'status': 'error', 'message': 'Registration ID is required'})
+            
+            user = DBSession.query(BQUser).filter_by(id=int(registration_id)).first()
+            
+            if not user:
+                return json.dumps({'status': 'error', 'message': 'User not found'})
+            
+            # Follow the exact pattern from EmailVerificationService.mark_user_as_verified()
+            # Add email_verified tag
+            verified_tag = Tag(parent=user)
+            verified_tag.name = 'email_verified'
+            verified_tag.value = 'true'
+            verified_tag.owner = user
+            DBSession.add(verified_tag)
+            
+            # Add is_approved tag for unified approval system
+            approved_tag = Tag(parent=user)
+            approved_tag.name = 'is_approved'
+            approved_tag.value = 'true'
+            approved_tag.owner = user
+            DBSession.add(approved_tag)
+            
+            # Add verification timestamp like EmailVerificationService does
+            from datetime import datetime, timezone
+            verified_time_tag = Tag(parent=user)
+            verified_time_tag.name = 'email_verified_at'
+            verified_time_tag.value = datetime.now(timezone.utc).isoformat()
+            verified_time_tag.owner = user
+            DBSession.add(verified_time_tag)
+
+            approved_time_tag = Tag(parent=user)
+            approved_time_tag.name = 'is_approved_at'
+            approved_time_tag.value = datetime.now(timezone.utc).isoformat()
+            approved_time_tag.owner = user
+            DBSession.add(approved_time_tag)
+
+            DBSession.flush()
+            
+            log.info(f"Admin approved registration for user: {user.resource_name}")
+            
+            return json.dumps({
+                'status': 'success',
+                'message': f'Registration approved for {user.resource_name}. User can now login.'
+            })
+            
+        except Exception as e:
+            log.exception("Error approving registration")
+            return json.dumps({'status': 'error', 'message': str(e)})
+    
+    @expose(content_type='application/json')
+    def registration_reject(self):
+        """Reject a user registration by deleting the user completely"""
+        if request.method != 'POST':
+            response.status = 405
+            return json.dumps({'status': 'error', 'message': 'Method not allowed'})
+        
+        try:
+            # Handle JSON request body
+            import json as json_module
+            if hasattr(request, 'json') and request.json:
+                data = request.json
+            else:
+                body = request.body.read() if hasattr(request.body, 'read') else request.body
+                if isinstance(body, bytes):
+                    body = body.decode('utf-8')
+                data = json_module.loads(body) if body else {}
+            
+            registration_id = data.get('registration_id')
+            
+            log.info(f"Reject request: registration_id={registration_id}, data={data}")
+            
+            if not registration_id:
+                return json.dumps({'status': 'error', 'message': 'Registration ID is required'})
+            
+            user = current_session.query(BQUser).filter_by(id=int(registration_id)).first()
+            
+            if not user:
+                return json.dumps({'status': 'error', 'message': 'User not found'})
+            
+            user_name = user.resource_name
+            user_uniq = user.resource_uniq
+            
+            # Use the existing delete_user method
+            try:
+                self.delete_user(user_uniq)
+                log.info(f"Admin rejected and deleted user: {user_name}")
+                return json.dumps({
+                    'status': 'success',
+                    'message': f'Registration rejected and user {user_name} has been deleted.'
+                })
+            except Exception as delete_error:
+                log.error(f"Error deleting user {user_name}: {delete_error}")
+                return json.dumps({
+                    'status': 'error', 
+                    'message': f'Failed to delete user: {str(delete_error)}'
+                })
+            
+        except Exception as e:
+            log.exception("Error rejecting registration")
+            return json.dumps({'status': 'error', 'message': str(e)})
     def _default(self, *arg, **kw):
         """
             Returns some command information
