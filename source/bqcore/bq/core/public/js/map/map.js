@@ -33,193 +33,163 @@ Ext.define('BQ.map.Map', {
     border: false,
     combo: false,
 
+    // Force proper layout for Google Maps
+    layout: 'fit',
+
+    // Add body style to ensure 100% dimensions
+    bodyStyle: {
+        width: '100%',
+        height: '100%'
+    },
+
     initComponent: function () {
+        // Set up global error handler FIRST, before anything else
+        this.setupGlobalErrorHandler();
         this.addListener('resize', this.resized, this);
         this.callParent();
+    },
+
+    setupGlobalErrorHandler: function () {
+        if (window.__bqMapErrorSuppressed) return;
+
+        var originalError = window.onerror;
+        window.onerror = function (msg, url, line, col, error) {
+            // Suppress Google Maps internal errors
+            if (msg && url &&
+                (url.includes('maps.googleapis.com') || url.includes('maps.gstatic.com')) &&
+                msg.match(/[a-zA-Z]\.\w+ is not a function/)) {
+                console.warn('Google Maps internal error suppressed:', msg);
+                return true;
+            }
+            if (msg === 'Script error.' && !url && !line) {
+                console.warn('Cross-origin script error suppressed (likely Google Maps)');
+                return true;
+            }
+            return originalError ? originalError.apply(this, arguments) : false;
+        };
+
+        window.addEventListener('error', function (event) {
+            if (event.filename &&
+                (event.filename.includes('maps.googleapis.com') ||
+                    event.filename.includes('maps.gstatic.com'))) {
+                console.warn('Google Maps error event suppressed:', event.message);
+                event.preventDefault();
+                event.stopPropagation();
+                return false;
+            }
+        }, true);
+
+        window.addEventListener('unhandledrejection', function (event) {
+            if (event.reason) {
+                var stack = event.reason.stack || '';
+                var message = event.reason.message || event.reason.toString();
+                if ((stack.includes('maps.googleapis.com') || stack.includes('maps.gstatic.com')) &&
+                    message.match(/[a-zA-Z]\.\w+ is not a function/)) {
+                    console.warn('Google Maps promise error suppressed:', message);
+                    event.preventDefault();
+                    return false;
+                }
+            }
+        });
+
+        window.__bqMapErrorSuppressed = true;
     },
 
     afterRender: function () {
         this.callParent();
         var me = this;
 
-        // Global error handler for Google Maps API internal errors
-        this.setupGlobalMapErrorHandler();
-
-        try {
-            // Initialize map with safer options to reduce race conditions
-            this.gmap = new google.maps.Map(this.body.dom, {
+        var initMap = function () {
+            me.gmap = new google.maps.Map(me.body.dom, {
                 zoom: 1,
                 center: new google.maps.LatLng(42.6507, 14.866),
                 mapTypeId: google.maps.MapTypeId.ROADMAP,
                 mapTypeControl: true,
-                mapTypeControlOptions: {
-                    style: google.maps.MapTypeControlStyle.HORIZONTAL_BAR,
-                    position: google.maps.ControlPosition.TOP_CENTER
-                },
                 zoomControl: true,
                 streetViewControl: false,
-                fullscreenControl: true,
-                // Disable UI temporarily during initialization to prevent race conditions
-                disableDefaultUI: false,
-                // Add these options to reduce internal API conflicts
-                gestureHandling: 'auto',
-                keyboardShortcuts: true
+                fullscreenControl: true
             });
 
-            // Wait for map to be fully initialized before adding controls
-            google.maps.event.addListenerOnce(this.gmap, 'idle', function () {
-                me.setupMapEventHandlers();
-            });
-
-        } catch (e) {
-            console.error('Error initializing Google Maps:', e);
-            return;
-        }
-        this.infoWindow = new google.maps.InfoWindow({ content: null, maxWidth: 450 }); // make one info window
-        this.bound = new google.maps.LatLngBounds();
-
-
-        if (this.resource instanceof BQDataset) {
-            // load dataset values
-            Ext.Ajax.request({
-                url: this.resource.uri + '/value',
-                callback: function (opts, succsess, response) {
-                    if (response.status >= 400)
-                        BQ.ui.error(response.responseText);
-                    else
-                        this.onImagesLoaded(response.responseXML);
-                },
-                scope: this,
-                disableCaching: false,
-                listeners: {
-                    scope: this,
-                    beforerequest: function () { this.setLoading('Loading images...'); },
-                    requestcomplete: function () { this.setLoading(false); },
-                    requestexception: function () { this.setLoading(false); },
-                },
-            });
-        } else if (this.resource instanceof BQImage) {
-            var id = this.resource.resource_uniq;
-            var uri_meta = '/image_service/' + id + '?meta';
-            var image = {
-                id: id,
-                name: this.resource.name,
-                uri: this.resource.uri,
-                thumbnail: '/image_service/' + id + '?thumbnail=280,280',
-                view: '/client_service/view?resource=/data_service/' + id,
-            };
-            this.requestEmbeddedMeta(uri_meta, image);
-        }
-    },
-
-    setupGlobalMapErrorHandler: function () {
-        var me = this;
-
-        // Comprehensive error suppression for Google Maps internal errors
-        if (!window.__bqMapErrorHandlerInstalled) {
-            var originalError = window.onerror;
-            window.onerror = function (message, source, lineno, colno, error) {
-                // Suppress common Google Maps internal errors
-                if (message && (
-                    message.indexOf('b.Ri is not a function') !== -1 ||
-                    message.indexOf('b.Oi is not a function') !== -1 ||
-                    message.indexOf('controls.js') !== -1 ||
-                    (source && source.indexOf('maps.googleapis.com') !== -1 &&
-                        message.match(/\w+\.\w+ is not a function/))
-                )) {
-                    console.warn('Google Maps internal error suppressed:', message);
-                    return true; // Prevent default error handling
-                }
-
-                // Call original error handler for other errors
-                if (originalError) {
-                    return originalError.apply(this, arguments);
-                }
-                return false;
-            };
-
-            // Also handle unhandled promise rejections from Google Maps
-            if (window.addEventListener) {
-                window.addEventListener('unhandledrejection', function (event) {
-                    if (event.reason && event.reason.message &&
-                        event.reason.message.match(/b\.\w+ is not a function/)) {
-                        console.warn('Google Maps promise rejection suppressed:', event.reason.message);
-                        event.preventDefault();
-                    }
-                });
-            }
-
-            window.__bqMapErrorHandlerInstalled = true;
-        }
-    },
-
-    setupMapEventHandlers: function () {
-        var me = this;
-
-        // Create a debounced map type change handler to prevent rapid calls
-        var mapTypeChangeTimeout;
-        var handleMapTypeChange = function () {
-            clearTimeout(mapTypeChangeTimeout);
-            mapTypeChangeTimeout = setTimeout(function () {
-                try {
-                    if (me.gmap && me.gmap.getDiv() && me.gmap.getDiv().offsetParent !== null) {
-                        // Only trigger resize if map is visible
-                        google.maps.event.trigger(me.gmap, 'resize');
-
-                        // Force a gentle pan to refresh the map tiles
+            // Fix for gray tiles when switching map types
+            google.maps.event.addListener(me.gmap, 'maptypeid_changed', function () {
+                setTimeout(function () {
+                    if (me.gmap) {
                         var center = me.gmap.getCenter();
-                        if (center) {
-                            me.gmap.panTo(center);
-                        }
-                    }
-                } catch (e) {
-                    // Silently handle any internal API errors during map type change
-                    console.warn('Map type change handled gracefully');
-                }
-            }, 250); // Increased delay to allow API to stabilize
-        };
+                        var zoom = me.gmap.getZoom();
 
-        // Wrap all Google Maps event listeners in error handlers
-        var safeEventListener = function (instance, eventName, handler) {
-            return google.maps.event.addListener(instance, eventName, function () {
-                try {
-                    return handler.apply(this, arguments);
-                } catch (e) {
-                    if (e.message && e.message.match(/b\.\w+ is not a function/)) {
-                        console.warn('Google Maps event error suppressed for', eventName);
-                    } else {
-                        console.error('Map event error on', eventName, ':', e);
+                        // Zoom trick - forces complete tile reload
+                        me.gmap.setZoom(zoom + 1);
+                        setTimeout(function () {
+                            me.gmap.setZoom(zoom);
+                            google.maps.event.trigger(me.gmap, 'resize');
+                            me.gmap.setCenter(center);
+
+                            // Force bounds recalculation
+                            var bounds = me.gmap.getBounds();
+                            if (bounds) {
+                                me.gmap.fitBounds(bounds);
+                            }
+                        }, 100);
                     }
-                }
+                }, 50);
             });
+
+            me.infoWindow = new google.maps.InfoWindow({ content: null, maxWidth: 450 });
+            me.bound = new google.maps.LatLngBounds();
+
+            if (me.resource instanceof BQDataset) {
+                me.loadDataset();
+            } else if (me.resource instanceof BQImage) {
+                me.loadImage();
+            }
         };
 
-        // Add map type change handler with error protection
-        safeEventListener(this.gmap, 'maptypeid_changed', handleMapTypeChange);
+        setTimeout(initMap, 100);
+    },
 
-        // Add other map event handlers with protection
-        safeEventListener(this.gmap, 'zoom_changed', function () {
-            // Handle zoom changes safely
+    loadDataset: function () {
+        Ext.Ajax.request({
+            url: this.resource.uri + '/value',
+            callback: function (opts, succsess, response) {
+                if (response.status >= 400)
+                    BQ.ui.error(response.responseText);
+                else
+                    this.onImagesLoaded(response.responseXML);
+            },
+            scope: this,
+            disableCaching: false,
+            listeners: {
+                scope: this,
+                beforerequest: function () { this.setLoading('Loading images...'); },
+                requestcomplete: function () { this.setLoading(false); },
+                requestexception: function () { this.setLoading(false); },
+            },
         });
+    },
 
-        safeEventListener(this.gmap, 'bounds_changed', function () {
-            // Handle bounds changes safely
-        });
+    loadImage: function () {
+        var id = this.resource.resource_uniq;
+        var uri_meta = '/image_service/' + id + '?meta';
+        var image = {
+            id: id,
+            name: this.resource.name,
+            uri: this.resource.uri,
+            thumbnail: '/image_service/' + id + '?thumbnail=280,280',
+            view: '/client_service/view?resource=/data_service/' + id,
+        };
+        this.requestEmbeddedMeta(uri_meta, image);
     },
 
     resized: function () {
         var me = this;
         if (this.gmap) {
-            try {
-                // Use a small delay to prevent race conditions during resize
-                setTimeout(function () {
-                    if (me.gmap && me.gmap.getDiv()) {
-                        google.maps.event.trigger(me.gmap, 'resize');
-                    }
-                }, 10);
-            } catch (e) {
-                console.warn('Map resize handled gracefully');
-            }
+            setTimeout(function () {
+                if (me.gmap && me.gmap.getDiv()) {
+                    var center = me.gmap.getCenter();
+                    google.maps.event.trigger(me.gmap, 'resize');
+                    if (center) me.gmap.setCenter(center);
+                }
+            }, 50);
         }
     },
 
