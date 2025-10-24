@@ -279,7 +279,6 @@ class LocalDriver (StorageDriver):
             return None
         localpath = tounicode(url2localpath (storeurl))
         log.debug ("checking %s", tounicode(localpath))
-        log.info(f'--- came before return {localpath}  {os.path.exists(localpath)} {localpath2url(localpath)}')
         return os.path.exists(localpath) and tounicode(localpath2url(localpath))
 
     def relative(self, storeurl):
@@ -324,7 +323,6 @@ class LocalDriver (StorageDriver):
 
     def pull (self, storeurl, localpath=None, blocking=True):
         "Pull a store file to a local location"
-        #log.debug('local_store localpath: %s', path)
         path,sub = split_subpath(storeurl)
         if not path.startswith('file:///'):
             if path.startswith('file://'):
@@ -333,8 +331,6 @@ class LocalDriver (StorageDriver):
                 path = os.path.join(self.top, path)
         # !!! Added tounicode to avoid issues with paths, i.e: b'dir...
         path = tounicode(url2localpath(path.replace('\\', '/')))
-
-        #log.debug('local_store localpath path: %s', path)
 
         # if path is a directory, list contents
         files = None

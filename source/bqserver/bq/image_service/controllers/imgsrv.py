@@ -1,4 +1,5 @@
-"""ImageServer for Bisque system."""
+"""ImageServer for Bisque system.
+Updated By: Wahid Sadique Koly"""
 
 __author__ = "Dmitry Fedorov and Kris Kvilekval"
 __version__ = "2.0.9"
@@ -293,15 +294,21 @@ class ImageServer(object):
                     # parse image info from original file
                     file_speed = infofile.replace(".info", ".speed")
                     for n, c in self.converters.items():
-                        # log.info(f"-----Trying to read image info using {n} with command {c} function {c.info}")
                         info = c.info(
                             ProcessToken(ifnm=filename, series=series), speed=file_speed
                         )
-                        # log.info(f"-----Image info got from c info: {info}")
                         if info is not None and len(info) > 0:
-                            info["converter"] = n
-                            break
-                    if info is None or "image_num_x" not in info:
+                            # For images, require basic dimension info
+                            # For videos/other formats, be more flexible
+                            if "image_num_x" in info or "format" in info:
+                                info["converter"] = n
+                                break
+                        
+                    if info is None or len(info) == 0:
+                        return None
+                    
+                    # For videos and other formats that don't have image dimensions
+                    if "image_num_x" not in info and "format" not in info:
                         return None
 
                     info.setdefault("image_num_t", 1)
