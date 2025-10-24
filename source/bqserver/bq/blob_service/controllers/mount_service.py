@@ -179,6 +179,7 @@ class MountServer(TGController):
             return "<resource/>"
 
         # hmm some path elements arrive %encoded and utf8..  convert back to simple unicode
+        # Handle Cyrillic and other Unicode characters properly in filenames
         path = [ url2unicode(x) for x in path ]
         method = tg.request.method
         if  method == 'GET':

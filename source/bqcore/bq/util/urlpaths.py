@@ -154,7 +154,14 @@ else:
         # http://stackoverflow.com/questions/14539807/convert-unicode-with-utf-8-string-as-content-to-str
         try:
             if isinstance(s, str):
-                s = s.encode('latin1')
+                # DON'T encode Unicode as latin1 - this corrupts Unicode characters!
+                # Instead, keep it as a proper Unicode string for non-ASCII characters
+                if all(ord(c) < 256 for c in s):
+                    # Only encode as latin1 if all characters are in the latin1 range
+                    s = s.encode('latin1')
+                else:
+                    # Keep as Unicode string for non-latin1 characters (like Cyrillic)
+                    return s
             # if we get here then we are  a bytestring (either ascii or utf8 encoded)
         except UnicodeEncodeError:
             # will be here if it *really* was unicode 16 (should still be unicode)
@@ -196,14 +203,35 @@ def config2url(conf):
 
 # !!! alternative approach
 def url2unicode(url):
-    "Unquote and try to decode"
-    url = urllib.parse.unquote (url)
-    if isinstance(url, bytes):
-        try:
-            return url.decode('utf-8')
-        except UnicodeDecodeError:
-            pass
-        except Exception as e:
-            # log.exception("Error decoding url %s: %s", url, e)
-            pass
-    return f"{url}"
+    "Unquote and try to decode with better Unicode support for Cyrillic characters"
+    # Handle different encoding scenarios for Unicode filenames
+    try:
+        # First try regular URL unquoting
+        url = urllib.parse.unquote(url)
+        
+        if isinstance(url, bytes):
+            # Try UTF-8 first (most common)
+            try:
+                return url.decode('utf-8')
+            except UnicodeDecodeError:
+                # Try latin-1 as fallback (preserves bytes)
+                try:
+                    return url.decode('latin-1')
+                except UnicodeDecodeError:
+                    # Last resort: replace invalid characters
+                    return url.decode('ascii', 'replace')
+        else:
+            # Already a string, but might be percent-encoded twice
+            if '%' in url:
+                try:
+                    # Try unquoting again in case of double encoding
+                    decoded_again = urllib.parse.unquote(url)
+                    if decoded_again != url:
+                        return decoded_again
+                except Exception:
+                    pass
+            return url
+    except Exception as e:
+        # log.exception("Error decoding url %s: %s", url, e)
+        # Return as-is if nothing works
+        return f"{url}"

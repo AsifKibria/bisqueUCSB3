@@ -1,5 +1,6 @@
 """
 Listing of operations
+Updated By: Wahid Sadique Koly
 """
 
 __author__    = "Dmitry Fedorov <dima@dimin.net>"
@@ -50,7 +51,7 @@ class MetaOperation(BaseOperation):
                 converter = dims.get('converter')
                 meta = self.server.converters[converter].meta(token)
 
-            if meta is None:
+            if meta is None or len(meta) == 0:
                 # exhaustively iterate over converters to find supporting one
                 for c in self.server.converters.values():
                     if c.name == dims.get('converter'): continue
