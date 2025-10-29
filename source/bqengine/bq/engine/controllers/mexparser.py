@@ -136,7 +136,7 @@ class MexParser(object):
                 continue
             node.set ('index', str(i))
 
-        input_nodes.sort (lambda n1,n2: cmp(int(n1.get('index')), int(n2.get('index'))))
+        input_nodes.sort(key=lambda n: int(n.get('index')))
         return input_nodes
 
 

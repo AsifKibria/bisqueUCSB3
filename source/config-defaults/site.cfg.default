@@ -67,6 +67,7 @@ e1.bisque.static_files = false
 [app:main]
 # pylons/paster config
 use = egg:bqcore
+make_body_seekable = true
 full_stack = true
 #filter-with = linesman
 

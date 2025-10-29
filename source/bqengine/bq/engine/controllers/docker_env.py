@@ -1,38 +1,36 @@
 """ Setup the environment for a docker execution.
 """
 
-
+from __future__ import with_statement
 
 import os
 import string
-import logging
-
 
 from bq.util.converters import asbool
 from .base_env import strtolist
 from .module_env import BaseEnvironment, ModuleEnvironmentError
 from .attrdict import AttrDict
 
-log = logging.getLogger('bq.engine_service.docker_env')
 
 DOCKER_RUN="""#!/bin/bash
 set -x
 
-mex=$(echo "$MEX_ID" | tr '[:upper:]' '[:lower:]')
-
-echo "image: ${DOCKER_IMAGE}" | tee params.yaml
-echo "args: ${@}" | tee -a params.yaml
-argo submit --log --from workflowtemplate/bqflow-module-template --parameter-file params.yaml --token $ARGO_TOKEN --generate-name ${mex}- 
-"""
-
-DOCKER_RUN_GPU="""#!/bin/bash 
-set -x 
- 
-mex=$(echo "$MEX_ID" | tr '[:upper:]' '[:lower:]') 
- 
-echo "image: ${DOCKER_IMAGE}" | tee params.yaml 
-echo "args: ${@}" | tee -a params.yaml 
-argo submit --log --from workflowtemplate/bqflow-module-gpu-template --parameter-file params.yaml --token $ARGO_TOKEN --generate-name ${mex}-  
+#mkdir -p ./output_files
+${DOCKER_LOGIN}
+${DOCKER_PULL}
+CONTAINER=$$(docker create ${DOCKER_IMAGE}  $@)
+${DOCKER_INPUTS}
+docker start $CONTAINER
+MODULE_RETURN=$$(docker wait  $CONTAINER)
+docker logs $CONTAINER
+${DOCKER_OUTPUTS}
+# docker will not copy to existing directory .. so create a new one and copy from that
+docker cp $CONTAINER:/module/ output_files
+mv -fuv ./output_files/* .
+#rsync -av ./output_files/ .
+rm -rf ./output_files/*/
+docker rm $CONTAINER
+exit $MODULE_RETURN
 """
 
 class DockerEnvironment(BaseEnvironment):
@@ -60,14 +58,10 @@ class DockerEnvironment(BaseEnvironment):
     docker_keys = [ 'docker.hub', 'docker.image', 'docker.hub.user', 'docker.hub.user', 'docker.hub.email',
                       'docker.login_tmpl', 'docker.default_tag' ]
 
-
     def process_config (self, runner, **kw):
         runner.load_section ('docker', runner.bisque_cfg)
         runner.load_section ('docker', runner.module_cfg)
         self.enabled = asbool(runner.config.get ('docker.enabled', False))
-        self.module_exec_env = runner.config.get('exec_env', '')
-        log.debug('module exection environment %s', self.module_exec_env)
-
         #self.docker_hub = runner.config.get('docker.hub', '')
         #self.docker_image = runner.config.get('docker.image', '')
         #self.docker_user = runner.config.get ('docker.hub.user', '')
@@ -133,7 +127,7 @@ class DockerEnvironment(BaseEnvironment):
                         docker_inputs.append (p)
 
             docker = self.create_docker_launcher(mex.rundir, mex.mex_id,
-                                                 docker_image, docker_login, docker_pull, docker_inputs, docker_outputs, self.module_exec_env)
+                                                 docker_image, docker_login, docker_pull, docker_inputs, docker_outputs)
             if mex.executable:
                 mex.executable.insert(0, docker)
                 #mex.files = ",".join (docker_inputs)
@@ -148,13 +142,8 @@ class DockerEnvironment(BaseEnvironment):
                                docker_login,
                                docker_pull,
                                docker_inputs,
-                               docker_outputs,
-                               module_exec_env):
-        if module_exec_env=='use_gpu':
-            log.info('executing module on gpu %s', module_exec_env)
-            docker_run = DOCKER_RUN_GPU
-        else:
-            docker_run = DOCKER_RUN
+                               docker_outputs,):
+        docker_run = DOCKER_RUN
         #if self.matlab_launcher and os.path.exists(self.matlab_launcher):
         #    matlab_launcher = open(self.matlab_launcher).read()
         content = string.Template(docker_run)
