@@ -1,0 +1,13 @@
+#!/bin/sh
+# This file can be used by supervisor to run command in the virtual env
+# Simply copy it to an accissible place
+
+
+. ${BISQUE:=bqenv}/bin/activate
+mkdir -p /tmp/bisque-python-eggs
+export PYTHON_EGG_CACHE=/tmp/bisque-python-eggs
+export PATH=${BISQUE:=bqenv}/bin:$PATH
+
+
+echo "STARTING " $(date) $PATH
+exec $@
