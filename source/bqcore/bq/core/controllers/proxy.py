@@ -5,7 +5,7 @@ import logging
 from urllib.parse import urlencode
 from urllib.parse import urlunsplit, urlsplit, urljoin
 
-from tg import expose, flash, require, url, request, response, redirect, config
+from tg import expose, flash, require, url, request, response, redirect, config, use_wsgi_app
 from lxml import etree
 from bq.core.lib.base import BaseController
 from bq.exceptions import ConfigurationError, IllegalOperation, RequestError
@@ -47,6 +47,12 @@ class ProxyController (BaseController):
         if not header['status'].startswith ('200'):
             log.debug ("request result %s \n %s" % (header, content))
             return ""
+        
+        # TurboGears 2.4+ requires WSGI apps to be wrapped with use_wsgi_app()
+        if hasattr(content, '__call__') and not isinstance(content, (str, bytes)):
+            log.debug("Proxied content is a WSGI app, wrapping with use_wsgi_app()")
+            return use_wsgi_app(content)
+        
         return content
 
 
