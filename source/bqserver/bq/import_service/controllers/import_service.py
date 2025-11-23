@@ -157,6 +157,8 @@ def is_filesystem_file(filename):
 
 def sanitize_filename(filename):
     """ Removes any path info that might be inside filename, and returns results. """
+    if filename is None:
+        return None
     return urllib.parse.unquote(filename).split("\\")[-1].split("/")[-1]
 
 
@@ -1134,15 +1136,17 @@ class import_serviceController(ServiceController):
         # append processing tags based on file type and extension
         mime = None
         if needs_guessing is True:
-            log.info('Guessing the mime type for: %s', sanitize_filename(uf.filename))
-            mime = mimetypes.guess_type(sanitize_filename(uf.filename))[0]
+            sanitized_filename = sanitize_filename(uf.filename)
+            log.info('Guessing the mime type for: %s', sanitized_filename)
+            if sanitized_filename is not None:
+                mime = mimetypes.guess_type(sanitized_filename)[0]
         if mime in self.filters:
             intags['type'] = mime
 
         # take care of funny extension cases: force deep guessing
         # 1) no extension, which might be in a form of some long string
         # 2) numerical extension as is used in Nanoscope images with numerical extensions
-        ext = os.path.splitext(uf.filename)[1]
+        ext = os.path.splitext(uf.filename)[1] if uf.filename else ''
         noext = (ext == '' or len(ext)>10 or ext.isdigit() is True)
         if ext.replace('.', '') in self.non_image_exts:
             needs_guessing = False
@@ -1293,21 +1297,37 @@ class import_serviceController(ServiceController):
             filepath = None # local path to the file
 
         def on_field (field):
-            log.debug ("FIELD %s=%s", field.field_name, field.value)
-            g.resource = field.value
+            field_name = field.field_name.decode('utf-8') if isinstance(field.field_name, bytes) else field.field_name
+            field_value = field.value.decode('utf-8') if isinstance(field.value, bytes) else field.value
+            log.debug ("FIELD %s=%s", field_name, field_value[:200] if field_value else None)
+            g.resource = field_value
 
         def on_file(fle):
-            log.debug ("FILE %s %s %s", fle.actual_file_name, fle.field_name, fle.size)
-            g.filepath = os.path.join (upload_dir, fle.actual_file_name)
-            g.filename = fle.file_name
+            actual_file_name = fle.actual_file_name.decode('utf-8') if isinstance(fle.actual_file_name, bytes) else fle.actual_file_name
+            field_name = fle.field_name.decode('utf-8') if isinstance(fle.field_name, bytes) else fle.field_name
+            file_name = fle.file_name.decode('utf-8') if isinstance(fle.file_name, bytes) else fle.file_name
+            
+            log.debug ("FILE %s %s %s", actual_file_name, field_name, fle.size)
+            g.filepath = os.path.join (upload_dir, actual_file_name)
+            g.filename = file_name
             g.fileobj = g.filepath and open (g.filepath, 'rb') #tmp File will be deleted unless we open it.
 
         _mkdir(upload_dir)
-        with open (uploaded) as input_stream:
-            parser = multipart.multipart.create_form_parser(headers, on_field,on_file, config=config)
+        with open (uploaded, 'rb') as input_stream:
+            # Get the actual file size instead of relying on Content-Length header
+            # NGINX upload module sets Content-Length to 0 but the actual file has content
+            actual_file_size = os.path.getsize(uploaded)
+            
+            parser = multipart.create_form_parser(headers, on_field, on_file, config=config)
+            
+            # Use actual file size instead of Content-Length header if Content-Length is 0 or incorrect
             content_length = headers.get('Content-Length')
             if content_length is not None:
                 content_length = int(content_length)
+                # If Content-Length is 0 but file has content, use actual file size
+                if content_length == 0 and actual_file_size > 0:
+                    log.debug("Content-Length is 0, using actual file size: %s bytes", actual_file_size)
+                    content_length = actual_file_size
             else:
                 content_length = float('inf')
             bytes_read = 0
@@ -1328,17 +1348,22 @@ class import_serviceController(ServiceController):
 
             # Tell our parser that we're done writing data.
             parser.finalize()
+        
+        if g.filepath is None and g.fileobj is None:
+            log.error("No file found in multipart data. Check that the upload contains a file field.")
+        
         return g
 
     @expose(content_type="text/xml")
     @require(predicates.not_anonymous())
     def transfer_x_file (self):
-        log.info ("X_file %s ", tg.request.headers) # ,  tg.request.body_file.read())
+        log.info ("X_file %s", tg.request.headers) 
 
         uploaded  = tg.request.headers.get ('X-File', None)
         if uploaded is None:
             log.error ("No X-file was set for special upload")
             abort (400, "No X-file header")
+
 
         try:
             g = None
@@ -1362,6 +1387,9 @@ class import_serviceController(ServiceController):
                     g.resource.set ('name', os.path.basename (g.filename))
                 if g.filepath:
                     g.resource.set ('value', "file://%s" % g.filepath)
+                elif g.fileobj is None:
+                    log.error("No file was uploaded or found in the multipart data")
+                    abort(400, "No file was uploaded")
             except etree.XMLSyntaxError:
                 log.exception ("while parsing %s" , g.resource)
                 abort (400, "illegal xml")

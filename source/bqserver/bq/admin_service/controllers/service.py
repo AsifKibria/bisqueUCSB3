@@ -142,7 +142,8 @@ log = logging.getLogger('bq.admin')
 
 if os.name != 'nt':
     def tail(fn, n=10):
-        cmd = 'tail -n {1} {0}'.format(fn, n)
+        # cmd = 'tail -n {1} {0}'.format(fn, n) # Old version
+        cmd = 'tail -n {0} {1}'.format(n, fn)
         return os.popen(cmd).readlines()
 
 elif os.name == 'nt':
@@ -722,12 +723,33 @@ class AdminController(ServiceController):
             if log_url is not None:
                 redirect(log_url)
             try:
-                fn = logging.getLoggerClass().root.handlers[0].stream.filename
+            # Old problematic codes
+            #     fn = logging.getLoggerClass().root.handlers[0].stream.filename
+            #     logs = tail(fn, 1000)
+            #     response.headers['Content-Type']  = 'text/plain'
+            #     return ''.join(logs)
+            # except Exception:
+            #     abort(500, 'Error while reading the log' )
+                # Try to get filename from handler
+                fn = None
+                for handler in logging.getLoggerClass().root.handlers:
+                    if hasattr(handler, 'baseFilename'):
+                        fn = handler.baseFilename
+                        break
+                
+                # Fallback to known log file location
+                if not fn or not os.path.exists(fn):
+                    fn = '/source/bisque_8080.log'
+                
+                if not os.path.exists(fn):
+                    abort(500, 'Log file not found: %s' % fn)
+                
                 logs = tail(fn, 1000)
-                response.headers['Content-Type']  = 'text/plain'
+                
+                response.headers['Content-Type']  = 'text/plain; charset=utf-8'
                 return ''.join(logs)
-            except Exception:
-                abort(500, 'Error while reading the log' )
+            except Exception as e:
+                abort(500, 'Error while reading the log: %s' % str(e))
         abort(400, 'not a supported operation' )
 
     @expose(content_type='text/xml')
