@@ -310,7 +310,7 @@ class statsController(ServiceController):
             
         res = { 'fields': mytitles, 'data': rows }
         return json.dumps(res)
-       
+    
     #-------------------------------------------------------------
     # Formatters - CSV 
     # MIME types: 
@@ -319,7 +319,7 @@ class statsController(ServiceController):
     #-------------------------------------------------------------           
     @expose(content_type='text/csv') 
     def csv (self, **kw):
-
+        import re 
         d = self.compute_stats(**kw)
         mytitles = []
         myiters = []
@@ -340,16 +340,16 @@ class statsController(ServiceController):
                             
         it = zip_longest(fillvalue='', *myiters)
         ts = (t for t in it)
-        stream = "\n".join([(', '.join([str(e).encode('utf8') for e in t])) for t in ts])
+        stream = "\n".join([(', '.join([str(e) for e in t])) for t in ts])
         
         filename = kw.get('filename', 'stats.csv')
         try:
-            disposition = 'filename="%s"'% filename.encode('ascii')
+            disposition = 'filename="%s"' % filename
         except UnicodeEncodeError:
-            disposition = 'attachment; filename="%s"; filename*="%s"'%(filename.encode('utf8'), filename.encode('utf8'))             
+            disposition = 'attachment; filename="%s"; filename*=UTF-8\'\'%s' % (filename, filename)             
         response.headers['Content-Type'] = 'text/csv'
         response.headers['Content-Disposition'] = disposition
-        return '%s\n%s'%( ', '.join(mytitles).encode('utf8'), stream)
+        return '%s\n%s' % (', '.join(mytitles), stream)
 
     def get_request (self, url, setmode):
         request = data_service.get_resource(url, view='deep')
