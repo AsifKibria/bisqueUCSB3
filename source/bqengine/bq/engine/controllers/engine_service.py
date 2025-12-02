@@ -62,7 +62,7 @@ from datetime import datetime
 import pkg_resources
 import tg
 #from tg import require
-from tg import config,  expose,  override_template
+from tg import config,  expose,  override_template, use_wsgi_app
 from pylons.controllers.util import abort, forward
 from paste.fileapp import FileApp
 #from repoze.what.predicates import not_anonymous
@@ -359,7 +359,8 @@ class EngineModuleResource(BaseController):
                 path = self.filepath(node.get('value'))
                 log.debug('Serving file: %s', path)
                 if os.path.exists(path):
-                    return forward(FileApp(path).cache_control (max_age=60*60*24*7*6))
+                    # Wrap with use_wsgi_app() for TurboGears 2.4+ compatibility
+                    return use_wsgi_app(FileApp(path).cache_control(max_age=60*60*24*7*6))
 
             else:
                 text = node.get ('value', None)
@@ -534,7 +535,8 @@ class EngineModuleResource(BaseController):
 
         static_path = os.path.join (self.path, 'public', *path)
         if os.path.exists(static_path):
-            return forward(FileApp(static_path).cache_control (max_age=60*60*24*7*6))
+            # Wrap with use_wsgi_app() for TurboGears 2.4+ compatibility
+            return use_wsgi_app(FileApp(static_path).cache_control(max_age=60*60*24*7*6))
 
         raise abort(404)
 

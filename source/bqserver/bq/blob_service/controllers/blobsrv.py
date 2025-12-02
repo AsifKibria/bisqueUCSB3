@@ -61,7 +61,7 @@ from sqlalchemy.exc import IntegrityError
 #import smokesignal
 
 import tg
-from tg import expose, config, require, abort
+from tg import expose, config, require, abort, use_wsgi_app
 from tg.controllers import RestController, TGController
 #from paste.fileapp import FileApp
 from bq.util.fileapp import BQFileApp
@@ -380,9 +380,17 @@ class BlobServer(RestController, ServiceMixin):
             content_type = self.guess_mime(filename)
             from tg import config
             max_age = config.get('bisque.blob_service.cache_max_age', 60*60*24*7*6)  # default 6 weeks
-            return forward(BQFileApp(localpath,
-                                     content_type=content_type,
-                                     content_disposition=disposition,).cache_control(max_age=max_age))
+            
+            # Fix: Ensure max_age is an integer, not string or float
+            try:
+                max_age = int(max_age)
+            except (ValueError, TypeError):
+                max_age = 60*60*24*7*6  # fallback to 6 weeks
+            
+            # Wrap with use_wsgi_app() for TurboGears 2.4+ compatibility
+            return use_wsgi_app(BQFileApp(localpath,
+                                          content_type=content_type,
+                                          content_disposition=disposition,).cache_control(max_age=max_age))
         except IllegalOperation:
             abort(404, "Error occurent fetching blob")
 
