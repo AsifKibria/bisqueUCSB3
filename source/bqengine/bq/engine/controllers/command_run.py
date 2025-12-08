@@ -408,7 +408,8 @@ class BaseRunner(object):
             status = 'running parallel'
         # add empty "outputs" section in topmex
         #self.session.update_mex(status=status, tags=[{'name':'outputs'}])
-        self.session.update_mex(status=status) # dima: modules add outputs section and the empty one complicates module UI
+        # !!! Note: status update moved to command_finish() to avoid deadlock in HTTP request thread
+        # self.session.update_mex(status=status) # dima: modules add outputs section and the empty one complicates module UI
         # if there is a prerun, run it now
         if self.prerun:
             self.info("prerun starting")

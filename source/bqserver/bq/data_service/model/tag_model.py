@@ -126,7 +126,7 @@ def create_tables1(bind):
     engine = config['pylons.app_globals'].sa_engine
     metadata.create_all (bind=engine, checkfirst = True)
 
-
+# !!! Updated indexes to add mysql_length for string columns to avoid index length errors
 taggable = Table('taggable', metadata,
                  Column('id', Integer, primary_key=True),
                  Column('mex_id', Integer, ForeignKey('taggable.id', name="mex_fk", ondelete="CASCADE"),index=True),
@@ -138,14 +138,15 @@ taggable = Table('taggable', metadata,
                  Column('resource_index', Integer),
                  Column('resource_hidden', Boolean),
                  Column('resource_type', Unicode(255), index=True ),  # will be same as tb_id UniqueName
-                 Column('resource_name', Unicode (1023), index=True),
+                 Column('resource_name', Unicode (1023)),
                  Column('resource_user_type', Unicode(1023), ),
                  Column('resource_value',  UnicodeText),
                  Column('resource_parent_id', Integer, ForeignKey('taggable.id', name="taggable_children_fk", ondelete="CASCADE"), index=True),
                  Column('document_id', Integer, ForeignKey('taggable.id', name="taggable_document_fk", ondelete="CASCADE"), index=True), # Unique Element
                  Column('resource_unid', UnicodeText),
+                 Index('idx_resource_name', 'resource_name', mysql_length = {'resource_name' : 255}),
                  Index('idx_user_unid', 'owner_id', 'resource_parent_id', 'resource_unid', unique=True,  mysql_length = {'resource_unid' : 255}),
-                 Index ('idx_resource_value', 'resource_value', postgresql_ops = { 'resource_value' : 'text_pattern_ops' })
+                 Index ('idx_resource_value', 'resource_value', mysql_length = {'resource_value' : 255}, postgresql_ops = { 'resource_value' : 'text_pattern_ops' })
                  )
 
 values = Table ('values', metadata,

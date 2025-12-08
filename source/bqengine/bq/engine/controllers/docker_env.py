@@ -20,7 +20,7 @@ set -x
 #mkdir -p ./output_files
 ${DOCKER_LOGIN}
 ${DOCKER_PULL}
-CONTAINER=$$(docker create ${DOCKER_IMAGE}  $@)
+CONTAINER=$$(docker create --network=host ${DOCKER_IMAGE}  $@)
 ${DOCKER_INPUTS}
 docker start $CONTAINER
 MODULE_RETURN=$$(docker wait  $CONTAINER)
@@ -34,6 +34,9 @@ rm -rf ./output_files/*/
 docker rm $CONTAINER
 exit $MODULE_RETURN
 """
+
+# !!! Can use `CONTAINER=$$(docker create --network=host ${DOCKER_IMAGE}  $@)` to enable host networking if needed
+# !!! instead of `CONTAINER=$$(docker create ${DOCKER_IMAGE}  $@)`
 
 class DockerEnvironment(BaseEnvironment):
     '''Docker Environment

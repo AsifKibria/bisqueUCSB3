@@ -1014,7 +1014,9 @@ known_db_types = {
     "sqlite": ("sqlite3", "", create_sqlite),
     "postgres": ("psycopg2", "psycopg2", create_postgres_sa),
     "postgresql": ("psycopg2", "psycopg2", create_postgres_sa),
-    "mysql": ("_mysql", "mysql-python", create_mysql_sa),
+    # "mysql": ("_mysql", "mysql-python", create_mysql_sa),
+    # !!! changed to use 'mysqlclient' instead of 'mysql-python' as it is not supported for python3
+    "mysql": ("MySQLdb", "mysqlclient", create_mysql_sa),
 }
 
 
